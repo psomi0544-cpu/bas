@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for bas-zebeqw on 2026-07-13T20:33:54Z
+# fly.toml app configuration file generated for bas-zebeqw on 2026-07-13T20:37:33Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'bas-zebeqw'
-primary_region = 'ams'
+primary_region = 'fra'
 
 [build]
   builder = 'paketobuildpacks/builder:base'
