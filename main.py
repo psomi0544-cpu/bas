@@ -32,7 +32,7 @@ ADMIN_ID = 720330522
 FONT_FILE = "font.ttf"
 DEV_USERNAME = "@xxbassamxx"
 CHANNEL_LINK = "https://t.me/promohunter13" 
-ALLOWED_GROUPS = [-1002142197378, -1002793271442]
+ALLOWED_GROUPS = [-1002793271442]
 
 # إعدادات البوت المستثنى
 EXEMPT_BOT_USERNAME = "@Hunterof_bot"
