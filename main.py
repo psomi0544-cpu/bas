@@ -5,13 +5,14 @@ import logging
 import math
 import asyncio
 import re
+import urllib.request
 from threading import Thread
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters, ConversationHandler, CallbackQueryHandler
 from telegram.error import Forbidden, BadRequest
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, features
 import arabic_reshaper
 from bidi.algorithm import get_display
 
@@ -29,12 +30,26 @@ def run_web():
 # ================= إعدادات البوت =================
 TOKEN = '8276416144:AAHQ19rjAtIHgAa693fG8ib7uvJn01FMEiU'
 ADMIN_ID = 720330522
-FONT_FILE = "font.ttf"
+
+# ================= إعدادات الخط التلقائية =================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_FILE = os.path.join(BASE_DIR, "Tajawal-Bold.ttf")
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
+if not os.path.exists(FONT_FILE):
+    logging.info("🔍 ملف الخط غير موجود، جاري تحميل خط Tajawal المعتمد...")
+    try:
+        url = "https://raw.githubusercontent.com/googlefonts/tajawal/main/fonts/ttf/Tajawal-Bold.ttf"
+        urllib.request.urlretrieve(url, FONT_FILE)
+        logging.info("✅ تم تحميل الخط بنجاح!")
+    except Exception as e:
+        logging.error(f"❌ فشل تحميل الخط: {e}")
+
 DEV_USERNAME = "@xxbassamxx"
 CHANNEL_LINK = "https://t.me/promohunter13" 
-ALLOWED_GROUPS = [-1002793271442]
+ALLOWED_GROUPS = [-1002142197378, -1002793271442]
 
-# إعدادات البوت المستثنى
 EXEMPT_BOT_USERNAME = "@Hunterof_bot"
 EXEMPT_BOT_ID = 7758344981
 
@@ -44,9 +59,6 @@ ALL_REACTIONS = [
     "👍", "👎", "❤️", "🔥", "🥰", "👏", "😁", "🤔", "🤯", "😱", "🤬", "😢", "🤩", "🤮", "💩", "🙏", "👌", "🕊️", "🤡", "🥱", "🥴", "🌚", "🌭", "💯", "🤣", "⚡️", "🍌", "🏆", "💔", "🤨", "😐", "🍓", "🍾", "💋", "🖕", "😈", "😴", "😭", "🤓", "👻", "👨‍💻", "👀", "🎃", "🎄", "💥", "🫡", "💊"
 ]
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# ================= إدارة قاعدة بيانات المستخدمين =================
 def load_users():
     if not os.path.exists(USERS_FILE): return []
     with open(USERS_FILE, 'r') as f:
@@ -59,7 +71,6 @@ def save_user(user_id):
         users.append(user_id)
         with open(USERS_FILE, 'w') as f: json.dump(users, f)
 
-# ================= دالة الحقوق (Watermark) =================
 def add_secure_watermark(image_bytes):
     try:
         base_image = Image.open(image_bytes).convert("RGBA")
@@ -69,40 +80,59 @@ def add_secure_watermark(image_bytes):
         txt_layer = Image.new("RGBA", (canvas_size, canvas_size), (255, 255, 255, 0))
         draw = ImageDraw.Draw(txt_layer)
         text_raw = "صياد العروض"
-        reshaped_text = arabic_reshaper.reshape(text_raw)
-        bidi_text = get_display(reshaped_text)
+        
         font_size = int(width / 16)
         if font_size < 24: font_size = 24
+        
+        if not os.path.exists(FONT_FILE):
+            raise FileNotFoundError(f"مسار الخط غير صحيح أو الملف غير موجود.")
+            
         try:
-            if os.path.exists(FONT_FILE): font = ImageFont.truetype(FONT_FILE, font_size)
-            else: font = ImageFont.load_default()
-        except: font = ImageFont.load_default()
+            font = ImageFont.truetype(FONT_FILE, font_size)
+        except Exception as e:
+            logging.error(f"❌ الملف موجود لكن فشل تحميله: {e}")
+            raise e
+
         stroke_width = int(font_size / 12)
         if stroke_width < 1: stroke_width = 1
-        text_bbox = draw.textbbox((0, 0), bidi_text, font=font, stroke_width=stroke_width)
+
+        if features.check("raqm"):
+            text_to_draw = text_raw
+            draw_kwargs = {'direction': 'rtl', 'language': 'ar'}
+        else:
+            reshaped_text = arabic_reshaper.reshape(text_raw)
+            text_to_draw = get_display(reshaped_text, base_dir='R')
+            draw_kwargs = {}
+
+        text_bbox = draw.textbbox((0, 0), text_to_draw, font=font, stroke_width=stroke_width, **draw_kwargs)
         text_w, text_h = text_bbox[2] - text_bbox[0], text_bbox[3] - text_bbox[1]
         gap_x, gap_y = int(text_w * 2.0), int(text_h * 3.0)
         center_offset = canvas_size // 2
+        
         for y in range(-center_offset, canvas_size, gap_y):
             for x in range(-center_offset, canvas_size, gap_x):
                 shift = (y // gap_y) % 2 * (gap_x // 2)
                 pos = (x + shift, y)
-                draw.text(pos, bidi_text, font=font, fill=(0, 0, 0, 70), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 70))
-                draw.text(pos, bidi_text, font=font, fill=(255, 255, 255, 70))
+                draw.text(pos, text_to_draw, font=font, fill=(0, 0, 0, 70), stroke_width=stroke_width, stroke_fill=(0, 0, 0, 70), **draw_kwargs)
+                draw.text(pos, text_to_draw, font=font, fill=(255, 255, 255, 70), **draw_kwargs)
+                
         rotated_layer = txt_layer.rotate(30, resample=Image.BICUBIC, expand=False)
         left, top = (canvas_size - width) // 2, (canvas_size - height) // 2
         final_txt_layer = rotated_layer.crop((left, top, left + width, top + height))
+        
         if final_txt_layer.size != base_image.size:
             final_txt_layer = final_txt_layer.resize(base_image.size, Image.Resampling.NEAREST)
+            
         watermarked = Image.alpha_composite(base_image, final_txt_layer)
         output = io.BytesIO()
         watermarked.convert("RGB").save(output, format="JPEG", quality=95)
         output.seek(0)
         return output
+        
     except Exception as e:
-        logging.error(f"Watermark Error: {e}"); return None
+        logging.error(f"Watermark Error: {e}")
+        return None
 
-# ================= أوامر البداية والإحصائيات =================
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     save_user(user.id)
@@ -110,7 +140,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
         f"👋 أهلاً بك يا **{user.first_name}** في بوت صياد العروض 🎯\n\n"
         f"✅ **حسابك مفعل ومسجل لدينا.**\n"
-        
         f"👨‍💻 المبرمج: {DEV_USERNAME}"
     )
 
@@ -137,7 +166,6 @@ async def bot_added_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 except: pass
             break
 
-# ================= نظام الدردشة المباشرة (Live Chat Bridge) =================
 ASK_CHAT_GROUP, LIVE_CHAT_MODE = range(20, 22)
 
 async def start_live_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,7 +209,6 @@ async def live_chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❌ حدث خطأ في الإرسال: {e}")
 
-# ================= نظام الإرسال بالخاص (/send) =================
 ASK_ID, ASK_MSG, CONFIRM_SEND = range(30, 33)
 
 async def start_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -231,7 +258,6 @@ async def handle_send_confirmation(update: Update, context: ContextTypes.DEFAULT
     context.user_data.clear()
     return ConversationHandler.END
 
-# ================= نظام التواصل وإدارة الخاص (توجيه والرد) =================
 WAITING_FOR_DM_REPLY = 10
 
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,7 +332,6 @@ async def send_dm_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# ================= نظام الإذاعة / البث (Broadcast) =================
 ASK_BC_MSG, CONFIRM_BC = range(11, 13)
 
 async def start_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -339,7 +364,6 @@ async def handle_bc_confirmation(update: Update, context: ContextTypes.DEFAULT_T
     else: await query.edit_message_text("❌ تم إلغاء البث.")
     context.user_data.clear(); return ConversationHandler.END
 
-# ================= نظام الرد وتعديل الروابط والرياكشنات =================
 CHOOSING_ACTION, WAITING_FOR_TEXT, CHOOSING_REACTION, WAITING_FOR_EDIT_TEXT = range(4)
 
 def get_reaction_keyboard():
@@ -359,6 +383,8 @@ def get_main_action_keyboard():
         [InlineKeyboardButton("✏️ تعديل الرسالة", callback_data='edit_msg')],
         [InlineKeyboardButton("🎭 إضافة رياكشن", callback_data='open_reactions')],
         [InlineKeyboardButton("🗑️ حذف الرسالة", callback_data='delete_msg')],
+        # تمت إضافة زر السحب السري هنا ⬇️
+        [InlineKeyboardButton("📥 سحب ونسخ الرسالة (سري)", callback_data='fetch_msg')],
         [InlineKeyboardButton("❌ إلغاء", callback_data='cancel_action')]
     ])
 
@@ -400,6 +426,18 @@ async def handle_button_choice(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.delete_message(chat_id=chat_username, message_id=message_id)
             await query.edit_message_text("ابشر طال عمرك 🫡\nتم مسح الرسالة من القروب نهائياً. 🗑️")
         except Exception as e: await query.edit_message_text(f"صار خطأ (قد تكون الرسالة مو للبوت أو قديمة): {e}")
+        context.user_data.clear(); return ConversationHandler.END
+    # تمت إضافة كود السحب هنا ⬇️
+    elif choice == 'fetch_msg':
+        try:
+            await context.bot.copy_message(
+                chat_id=update.effective_chat.id,
+                from_chat_id=chat_username,
+                message_id=message_id
+            )
+            await query.edit_message_text("ابشر طال عمرك 🫡\n✅ تم سحب الرسالة لك بالخاص بنجاح بدون أي أثر بالقروب (بدون توجيه) 🤫")
+        except Exception as e:
+            await query.edit_message_text(f"❌ صار خطأ (قد تكون الرسالة محذوفة أو البوت مو بالقروب): {e}")
         context.user_data.clear(); return ConversationHandler.END
     elif choice == 'cancel_action':
         await query.edit_message_text("تم الإلغاء. 🛡️")
@@ -458,7 +496,6 @@ async def edit_custom_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data.clear()
     return ConversationHandler.END
 
-# ================= ميزة الحفظ اليدوي للحقوق (مُحدثة) =================
 async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     user_id = update.effective_user.id
@@ -470,7 +507,6 @@ async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     if not (is_photo or is_video or is_text): return
 
-    # 🚫 منع الأعضاء من حفظ الفيديوهات والنصوص (فقط صور مسموحة لهم)
     if (is_video or is_text) and user_id != ADMIN_ID:
         return
 
@@ -483,13 +519,12 @@ async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     status_msg = await msg.reply_text("ابشر طال عمرك 🫡" if user_id == ADMIN_ID else "🛡️ لحظات...")
 
     try:
-        # إزالة تنسيق parse_mode عند إرسال الميديا لتفادي خطأ Can't parse entities للأبد
         caption = f"✅ تم الحفظ.\n\n{target.caption if target.caption else ''}\n\n🤖 عبر بوت صياد العروض | {DEV_USERNAME}"
 
         if is_text: 
             await context.bot.send_message(chat_id=user_id, text=f"{target.text}\n\n🤖 @xxbassamxx")
         elif is_photo:
-            file = await target.photo[-1].get_file()
+            file = await target.photo[-1].get_file(read_timeout=60, connect_timeout=60)
             stream = io.BytesIO()
             await file.download_to_memory(out=stream)
             stream.seek(0)
@@ -501,16 +536,29 @@ async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 raise Exception("فشل دمج الحقوق")
 
             final.seek(0)
-            # تم إزالة parse_mode من هنا
-            await context.bot.send_photo(chat_id=user_id, photo=final, caption=caption)
+            await context.bot.send_photo(
+                chat_id=user_id, 
+                photo=final, 
+                caption=caption,
+                read_timeout=60, 
+                write_timeout=60, 
+                connect_timeout=60
+            )
 
         elif is_video:
-            file = await target.video.get_file()
+            file = await target.video.get_file(read_timeout=120, connect_timeout=120)
             stream = io.BytesIO()
             await file.download_to_memory(out=stream)
             stream.seek(0)
-            # تم إزالة parse_mode من هنا
-            await context.bot.send_video(chat_id=user_id, video=stream, caption=caption)
+            
+            await context.bot.send_video(
+                chat_id=user_id, 
+                video=stream, 
+                caption=caption,
+                read_timeout=120, 
+                write_timeout=120, 
+                connect_timeout=120
+            )
 
         if user_id != ADMIN_ID:
             await status_msg.edit_text("✅ تم الإرسال بالخاص.")
@@ -520,14 +568,12 @@ async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await msg.delete()
 
     except (Forbidden, BadRequest) as e:
-        # إذا الخطأ مب بسبب (Chat not found) يرفع الخطأ عشان نعرف وش المشكلة
         if isinstance(e, BadRequest) and "chat not found" not in str(e).lower():
             await status_msg.edit_text(f"❌ حدث خطأ غير متوقع: {e}")
             await asyncio.sleep(3)
             await status_msg.delete()
             return
 
-        # الزر المباشر لتفعيل البوت إذا كان العضو مو مفعله أو مسوي حظر
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🤖 تفعيل البوت لاستلام الصور (اضغط هنا)", url=f"https://t.me/{bot_username}?start=1")]])
         await status_msg.edit_text(
             "⚠️ **عذراً، لا أستطيع إرسال الصورة لك!**\n\n"
@@ -543,10 +589,18 @@ async def manual_save_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await asyncio.sleep(3)
         await status_msg.delete()
 
-# ================= التشغيل النهائي وتوزيع المجموعات =================
 if __name__ == '__main__':
     Thread(target=run_web).start()
-    app_bot = ApplicationBuilder().token(TOKEN).build()
+    
+    app_bot = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(60)
+        .pool_timeout(60)
+        .build()
+    )
 
     app_bot.add_handler(CommandHandler("start", start_command))
     app_bot.add_handler(CommandHandler("stats", stats_command, filters=filters.User(ADMIN_ID)))
@@ -594,14 +648,8 @@ if __name__ == '__main__':
         },
         fallbacks=[CommandHandler('cancel', lambda u,c: ConversationHandler.END)]))
 
-    # ================= ترتيب الهاندلرات =================
-
-    # 1. هاندلر الحفظ 
     app_bot.add_handler(MessageHandler(filters.TEXT & filters.REPLY, manual_save_handler), group=1)
-
-    # 2. هاندلر الخاص (توجيه رسائل الخاص للإدارة)
     app_bot.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND & ~filters.User(ADMIN_ID), forward_to_admin))
 
-    print("✅ البوت اشتغل! تم إضافة رابط تفعيل البوت المباشر للأعضاء.")
+    print("✅ البوت اشتغل! تم إضافة مهلة انتظار أطول لتفادي مشاكل ضعف السيرفر.")
     app_bot.run_polling()
-
